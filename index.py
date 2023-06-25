@@ -23,7 +23,7 @@ filename_stem = os.path.join(parent_dir, f"room_{room_id}")
 
 db_write_queue = DbBatchWriteQueue(filename_stem)
 
-room = live.LiveDanmaku(room_id)
+room = live.LiveDanmaku(room_id, max_retry=12, retry_after=5)
 
 
 @room.on("DANMU_MSG")
@@ -97,7 +97,8 @@ if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     try:
         loop.run_until_complete(main())
-    except KeyboardInterrupt:
-        close()
+    except Exception as e:
+        logging.exception(str(e))
     finally:
+        close()
         logging.info("Program exit.")
