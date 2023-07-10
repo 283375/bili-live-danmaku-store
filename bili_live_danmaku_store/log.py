@@ -1,6 +1,17 @@
 import logging
 import sys
 
+LOG_FILE_FORMATTER = logging.Formatter(
+    style="{",
+    fmt="[{name} {asctime} {levelname}]@{thread}: {message}",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+LOG_STDOUT_FORMATTER = logging.Formatter(
+    style="{",
+    fmt="[{name} {asctime} {levelname}]@{thread}: {message}",
+    datefmt="%m-%d %H:%M:%S",
+)
+
 
 def configure_logger(logger: logging.Logger, filename_stem: str):
     """
@@ -14,16 +25,8 @@ def configure_logger(logger: logging.Logger, filename_stem: str):
 
     logger.setLevel(logging.DEBUG)
 
-    log_file_formatter = logging.Formatter(
-        style="{",
-        fmt="[{name} {asctime} {levelname}]@{thread}: {message}",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-    log_stdout_formatter = logging.Formatter(
-        style="{",
-        fmt="[{name} {asctime} {levelname}]@{thread}: {message}",
-        datefmt="%m-%d %H:%M:%S",
-    )
+    log_file_formatter = LOG_FILE_FORMATTER
+    log_stdout_formatter = LOG_STDOUT_FORMATTER
 
     log_file_handler = logging.FileHandler(
         filename=f"{filename_stem}.log", encoding="utf-8"

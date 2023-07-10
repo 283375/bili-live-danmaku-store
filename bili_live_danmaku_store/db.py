@@ -1,55 +1,18 @@
-from datetime import datetime
 import logging
-import sqlite3
+from datetime import datetime
 from threading import Lock, Timer
+from typing import Type
 
-from .models import BaseInsert, DanmakuInsert, InteractWordInsert
+from sqlalchemy import Engine
+from sqlalchemy.orm import Session
+
+from .models import Property, TableBase
+
+logger = logging.getLogger(__name__)
 
 
-def get_conn(filename_stem):
-    conn = sqlite3.connect(f"{filename_stem}.db")
-    conn.execute("PRAGMA journal_mode = WAL;")
-
-    return conn
-
-
-def init_db(filename_stem):
-    conn = get_conn(filename_stem)
-
-    with conn:
-        cursor = conn.cursor()
-        init_sqls = [
-            """
-            CREATE TABLE DANMU_MSG (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp    INTEGER,
-                uid          INTEGER,
-                username     TEXT,
-                medal_name   TEXT,
-                medal_level  INTEGER,
-                content      TEXT,
-                crc32        TEXT
-            )
-            """,
-            """
-            CREATE TABLE INTERACT_WORD (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp    INTEGER,
-                uid          INTEGER,
-                username     TEXT,
-                medal_name   TEXT,
-                medal_level  INTEGER
-            )
-            """,
-            """
-            CREATE TABLE properties (
-                key    TEXT UNIQUE NOT NULL,
-                value  TEXT
-            )
-            """,
-            "INSERT INTO properties VALUES ('version', 'kx-alpha-0.0.2')",
-        ]
-        [cursor.execute(init_sql) for init_sql in init_sqls]
+def init(engine: Engine, checkfirst=False):
+    TableBase.metadata.create_all(engine, checkfirst=checkfirst)
 
 
 class RepeatTimer(Timer):
@@ -64,61 +27,68 @@ class RepeatTimer(Timer):
 
 
 class DbBatchWriteQueue:
-    def __init__(self, filename_stem: str):
+    def __init__(self):
         self.__lock = Lock()
 
-        self.__filename_stem = filename_stem
+        self.__sessionmaker: Type[Session] | None = None
 
-        self.__DANMU_MSG: list[DanmakuInsert] = []
-        self.__INTERACT_WORD: list[InteractWordInsert] = []
-        self.__inserts: list[list[BaseInsert]] = [
-            self.__DANMU_MSG,
-            self.__INTERACT_WORD,
-        ]
-
-        self.append_DANMU_MSG = self.append_wrapper(self.__DANMU_MSG)
-        self.append_INTERACT_WORD = self.append_wrapper(self.__INTERACT_WORD)
+        self.__models = []
+        self.append_model = self.append_wrapper(self.__models)
 
         self.timer = RepeatTimer(10.0, self.commit)
 
+    def set_sessionmaker(self, __sessionmaker):
+        """
+        ```py
+        from sqlalchemy.orm import sessionmaker
+
+        Session = sessionmaker(...)
+        queue = DbBatchWriteQueue()
+        queue.set_sessionmaker(Session)
+        ```
+        """
+        self.__sessionmaker = __sessionmaker
+
     def append_wrapper(self, __list: list, /):
-        def wrapper(datacls, /):
+        def wrapper(__value, /):
             self.__lock.acquire()
-            __list.append(datacls)
+            __list.append(__value)
             self.__lock.release()
 
         return wrapper
 
     def commit(self):
         self.__lock.acquire()
+
+        if self.__sessionmaker is None or not callable(self.__sessionmaker):
+            logger.critical("sessionmaker not set!")
+
         try:
-            with get_conn(self.__filename_stem) as conn:
-                cursor = conn.cursor()
-                insert_num = 0
-                for insert_list in self.__inserts:
-                    if not insert_list:
-                        continue
-                    insert_clause = insert_list[0].insert_clause()
-                    cursor.executemany(
-                        insert_clause, [datacls.param_list() for datacls in insert_list]
-                    )
-                    insert_num += len(insert_list)
-                cursor.close()
-                conn.commit()
-            logging.info(f"Wrote {insert_num} entries into database.")
+            with self.__sessionmaker() as session:
+                session.add_all(self.__models)
+                session.commit()
+            logger.info(f"Wrote {len(self.__models)} entries into database.")
         except Exception:
-            logging.exception("db write fail")
-            logging.warning("following queue cleared")
-            [logging.warning(repr(l)) for l in self.__inserts]
+            logger.exception("Error occured while inserting to database:")
+            logger.error(
+                "Rolling back transaction and discarding the following items:"
+                + "\n".join(m.__dict__ for m in self.__models)
+            )
         finally:
-            [l.clear() for l in self.__inserts]
+            self.__models.clear()
             self.__lock.release()
 
     def close(self):
         self.timer.cancel()
         self.commit()
-        with get_conn(self.__filename_stem) as conn:
-            cursor = conn.cursor()
-            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
-            cursor.execute(f"INSERT INTO properties VALUES ('end_record', '{now_str}')")
-            cursor.close()
+
+        if callable(self.__sessionmaker):
+            session = self.__sessionmaker()
+            if isinstance(session, Session):
+                with session:
+                    session.add(
+                        Property(
+                            key="end_record",
+                            value=datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f"),
+                        )
+                    )

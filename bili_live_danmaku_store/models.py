@@ -1,55 +1,44 @@
-from contextlib import suppress
-from dataclasses import dataclass
+from typing import Optional
+
+from sqlalchemy import Boolean, Integer, String
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
-@dataclass
-class BaseInsert:
-    def preserve_fields(self):
-        return ["_table_name"]
-
-    def fields(self):
-        fields = list(self.__dataclass_fields__.keys())
-        with suppress(ValueError):
-            [fields.remove(pf) for pf in self.preserve_fields()]
-        return fields
-
-    def insert_clause(self, table_name: str = None) -> str:
-        if table_name is None and hasattr(self, "_table_name"):
-            table_name = self._table_name
-
-        assert table_name, "Unexpected empty table name"
-
-        fields = self.fields()
-        return (
-            f"INSERT INTO {table_name} ("
-            + ", ".join(fields)
-            + ") VALUES ("
-            + ", ".join("?" * len(fields))
-            + ")"
-        )
-
-    def param_list(self) -> list:
-        fields = self.fields()
-        return [self.__getattribute__(field) for field in fields]
+class TableBase(DeclarativeBase):
+    pass
 
 
-@dataclass(kw_only=True)
-class DanmakuInsert(BaseInsert):
-    _table_name: str = "DANMU_MSG"
-    timestamp: int
-    uid: int
-    username: str
-    medal_name: str
-    medal_level: int
-    content: str
-    crc32: str
+class Property(TableBase):
+    __tablename__ = "properties"
+
+    key: Mapped[str] = mapped_column(String(), primary_key=True)
+    value: Mapped[str] = mapped_column(String())
 
 
-@dataclass(kw_only=True)
-class InteractWordInsert(BaseInsert):
-    _table_name: str = "INTERACT_WORD"
-    timestamp: int
-    uid: int
-    username: str
-    medal_name: str
-    medal_level: int
+class DANMU_MSG(TableBase):
+    __tablename__ = "DANMU_MSG"
+
+    id: Mapped[int] = mapped_column(Integer(), primary_key=True)
+
+    timestamp: Mapped[int] = mapped_column(Integer())
+    uid: Mapped[int] = mapped_column(Integer())
+    username: Mapped[str] = mapped_column(String())
+    medal_room_id: Mapped[Optional[int]] = mapped_column(Integer(), nullable=True)
+    medal_name: Mapped[Optional[str]] = mapped_column(String(), nullable=True)
+    medal_level: Mapped[Optional[int]] = mapped_column(Integer(), nullable=True)
+    content: Mapped[str] = mapped_column(String())
+    # crc32: Mapped[str] = mapped_column(String())
+
+
+class INTERACT_WORD(TableBase):
+    __tablename__ = "INTERACT_WORD"
+
+    id: Mapped[int] = mapped_column(Integer(), primary_key=True)
+
+    timestamp: Mapped[int] = mapped_column(Integer())
+    trigger_time: Mapped[int] = mapped_column(Integer())
+    uid: Mapped[int] = mapped_column(Integer())
+    username: Mapped[str] = mapped_column(String())
+    medal_room_id: Mapped[Optional[int]] = mapped_column(Integer(), nullable=True)
+    medal_name: Mapped[Optional[str]] = mapped_column(String(), nullable=True)
+    medal_level: Mapped[Optional[int]] = mapped_column(Integer(), nullable=True)
